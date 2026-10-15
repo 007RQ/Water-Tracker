@@ -79,14 +79,33 @@ h1{font-size:30px;font-weight:700;letter-spacing:-.5px}
 .total{font-size:18px;font-weight:600;opacity:.95}
 .remain{font-size:15px;opacity:.8;margin-top:6px}
 
-.controls{display:flex;flex-direction:column;gap:14px;padding:18px}
-.chips{display:flex;gap:8px}
-.chip{
-  flex:1;padding:12px 0;border-radius:18px;border:1px solid var(--stroke);
-  background:rgba(255,255,255,.1);color:#fff;font:600 15px inherit;cursor:pointer;
-  transition:transform .2s,background .2s;
+.controls{display:flex;flex-direction:column;gap:16px;padding:18px}
+
+/* барабан (как выбор времени в iOS) */
+.wheel-wrap{
+  position:relative;height:180px;overflow:hidden;
+  -webkit-mask-image:linear-gradient(transparent,#000 35%,#000 65%,transparent);
+          mask-image:linear-gradient(transparent,#000 35%,#000 65%,transparent);
 }
-.chip.active{background:rgba(255,255,255,.4);transform:scale(1.05)}
+.wheel{
+  height:100%;overflow-y:auto;scroll-snap-type:y mandatory;scrollbar-width:none;
+  padding:70px 0;overscroll-behavior:contain;
+}
+.wheel::-webkit-scrollbar{display:none}
+.wheel div{
+  height:40px;line-height:40px;text-align:center;scroll-snap-align:center;
+  font-size:26px;font-weight:600;font-variant-numeric:tabular-nums;
+  opacity:.35;transform:scale(.9);transition:opacity .15s,transform .15s;
+}
+.wheel-band{
+  position:absolute;left:12px;right:12px;top:50%;height:40px;transform:translateY(-50%);
+  border-radius:14px;background:rgba(255,255,255,.18);border:1px solid var(--stroke);
+  pointer-events:none;
+}
+.unit{
+  position:absolute;right:30px;top:50%;transform:translateY(-50%);
+  font-size:16px;font-weight:600;opacity:.85;pointer-events:none;z-index:2;
+}
 
 .slider{
   position:relative;height:68px;border-radius:34px;overflow:hidden;
@@ -169,11 +188,10 @@ input{
   </div>
 
   <div class="glass controls">
-    <div class="chips" id="chips">
-      <button class="chip" data-ml="150">150</button>
-      <button class="chip" data-ml="250">250</button>
-      <button class="chip" data-ml="330">330</button>
-      <button class="chip" data-ml="500">500</button>
+    <div class="wheel-wrap">
+      <div class="wheel-band"></div>
+      <div class="wheel" id="wheel"></div>
+      <span class="unit">мл</span>
     </div>
 
     <div class="slider" id="slider">
@@ -200,6 +218,8 @@ input{
 const $ = s => document.querySelector(s);
 const KEY = 'water-tracker-v1';
 const DROP = 'M256 80 C256 80 150 220 150 312 A106 106 0 0 0 362 312 C362 220 256 80 256 80Z';
+const ITEM_H = 40;
+const VALUES = Array.from({ length: 100 }, (_, i) => (i + 1) * 10); // 10..1000 мл
 
 let state = load();
 
@@ -213,37 +233,44 @@ function load(){
     total: sameDay ? (s.total || 0) : 0,
     date: today,
     celebrated: sameDay ? !!s.celebrated : false,
-    amount: 250
+    amount: s.amount || 250
   };
 }
 function save(){
   localStorage.setItem(KEY, JSON.stringify({
-    goal: state.goal, total: state.total, date: state.date, celebrated: state.celebrated
+    goal: state.goal, total: state.total, date: state.date,
+    celebrated: state.celebrated, amount: state.amount
   }));
 }
 
-function render(){
-  const p = Math.min(state.total / state.goal, 1);
-  $('#water').style.height = (p * 100).toFixed(1) + '%';
-  $('#percent').textContent = Math.round(p * 100) + '%';
-  $('#total').textContent = `${state.total} / ${state.goal} мл`;
-  $('#remain').textContent = p >= 1 ? 'Цель выполнена 🎉' : `Осталось ${state.goal - state.total} мл`;
-  document.body.classList.toggle('done', p >= 1);
-
-  document.querySelectorAll('.chip').forEach(c =>
-    c.classList.toggle('active', +c.dataset.ml === state.amount));
-  $('#sliderLabel').textContent = `Свайпни, чтобы добавить ${state.amount} мл`;
-}
-
-// Выбор порции
-$('#chips').addEventListener('click', e => {
-  const b = e.target.closest('.chip');
-  if (!b) return;
-  state.amount = +b.dataset.ml;
-  render();
+/* ----- барабан ----- */
+const wheel = $('#wheel');
+VALUES.forEach(v => {
+  const d = document.createElement('div');
+  d.textContent = v;
+  wheel.appendChild(d);
 });
 
-// Свайп-подтверждение
+function setWheelStyle(){
+  const center = wheel.scrollTop / ITEM_H;
+  [...wheel.children].forEach((el, i) => {
+    const d = Math.abs(i - center);
+    el.style.opacity = Math.max(0.25, 1 - d * 0.3);
+    el.style.transform = `scale(${Math.max(0.8, 1 - d * 0.06)})`;
+  });
+}
+
+wheel.addEventListener('scroll', () => {
+  const i = Math.min(VALUES.length - 1, Math.max(0, Math.round(wheel.scrollTop / ITEM_H)));
+  if (VALUES[i] !== state.amount) {
+    state.amount = VALUES[i];
+    save();
+    $('#sliderLabel').textContent = `Свайпни, чтобы добавить ${state.amount} мл`;
+  }
+  setWheelStyle();
+}, { passive: true });
+
+/* ----- свайп-подтверждение ----- */
 const slider = $('#slider'), knob = $('#knob'), fill = $('#fill');
 let drag = null;
 const maxDx = () => slider.clientWidth - knob.offsetWidth - 8;
@@ -294,6 +321,16 @@ function addWater(){
   }
 }
 
+function render(){
+  const p = Math.min(state.total / state.goal, 1);
+  $('#water').style.height = (p * 100).toFixed(1) + '%';
+  $('#percent').textContent = Math.round(p * 100) + '%';
+  $('#total').textContent = `${state.total} / ${state.goal} мл`;
+  $('#remain').textContent = p >= 1 ? 'Цель выполнена 🎉' : `Осталось ${state.goal - state.total} мл`;
+  document.body.classList.toggle('done', p >= 1);
+  $('#sliderLabel').textContent = `Свайпни, чтобы добавить ${state.amount} мл`;
+}
+
 function celebrate(){
   toast('Цель выполнена! Так держать 💧');
   const colors = ['#fde047','#67e8f9','#86efac','#f0abfc','#fff'];
@@ -318,7 +355,7 @@ function toast(text){
   toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
 }
 
-// Настройки
+/* ----- настройки ----- */
 const overlay = $('#overlay');
 $('#openSettings').onclick = () => {
   $('#goalInput').value = state.goal;
@@ -341,7 +378,7 @@ $('#resetToday').onclick = () => {
   overlay.classList.remove('open');
 };
 
-// Иконка для iPhone (генерируется из того же контура, что и icon.svg)
+/* иконка для iPhone */
 (function makeAppleIcon(){
   const c = document.createElement('canvas');
   c.width = c.height = 180;
@@ -355,6 +392,10 @@ $('#resetToday').onclick = () => {
   $('#appleIcon').href = c.toDataURL('image/png');
 })();
 
+/* стартовая позиция барабана на сохранённом значении */
+const startIdx = Math.max(0, VALUES.indexOf(state.amount));
+wheel.scrollTop = startIdx * ITEM_H;
+setWheelStyle();
 render();
 
 if ('serviceWorker' in navigator) {
