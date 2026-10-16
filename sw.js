@@ -1,4 +1,4 @@
-const CACHE = 'water-tracker-v1';
+const CACHE = 'water-tracker-v2';
 const ASSETS = [
   './',
   './index.html',
@@ -20,16 +20,16 @@ self.addEventListener('activate', e => {
   );
 });
 
+/* сначала сеть, если нет связи — кэш */
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
   e.respondWith(
-    caches.match(e.request).then(cached => {
-      const network = fetch(e.request).then(res => {
+    fetch(e.request)
+      .then(res => {
         const copy = res.clone();
         caches.open(CACHE).then(c => c.put(e.request, copy));
         return res;
-      }).catch(() => cached);
-      return cached || network;
-    })
+      })
+      .catch(() => caches.match(e.request))
   );
 });
